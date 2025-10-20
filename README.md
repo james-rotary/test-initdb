@@ -143,6 +143,46 @@ curl http://localhost:3000/api/health || true
 * Multi-node CockroachDB in secure mode.
 * Dedicated migration Job instead of entrypoint migrations (for stricter control).
 
+### Sealed Secrets (DATABASE_URL)
+
+The backend's `DATABASE_URL` is now stored as a Bitnami SealedSecret for GitOps safety (only the cluster with the private key can decrypt it).
+
+Files involved:
+* `crdb-minikube/pim-backend/sealed-secret-db-url.yaml` (committed, encrypted value)
+* Decrypted runtime Secret: `pim-backend-db-url` (namespace `pim`)
+* Deployment consumes it via `env.secretKeyRef`.
+
+Generate / rotate:
+```bash
+kubeseal --controller-name=sealed-secrets-controller \
+				 --controller-namespace=kube-system \
+				 --fetch-cert > sealed-secrets.crt
+
+cat > /tmp/db-url-secret.yaml <<'EOF'
+apiVersion: v1
+kind: Secret
+metadata:
+	name: pim-backend-db-url
+	namespace: pim
+type: Opaque
+stringData:
+	DATABASE_URL: postgresql://root@cockroachdb-public.crdb.svc.cluster.local:26257/testdb?sslmode=disable
+EOF
+
+kubeseal --format=yaml --cert=sealed-secrets.crt < /tmp/db-url-secret.yaml > /tmp/sealed-secret-db-url.yaml
+grep DATABASE_URL /tmp/sealed-secret-db-url.yaml   # copy encrypted value
+```
+Paste the encrypted value into `sealed-secret-db-url.yaml` under `spec.encryptedData.DATABASE_URL`, commit, push, and let ArgoCD sync.
+
+Verification:
+```bash
+kubectl -n pim get sealedsecret pim-backend-db-url
+kubectl -n pim get secret pim-backend-db-url -o jsonpath='{.data.DATABASE_URL}' | base64 -d
+kubectl -n pim exec deploy/pim-backend-api -- /bin/sh -c 'echo $DATABASE_URL'
+```
+
+If you reinstall the sealed-secrets controller (losing its private key), you must reseal all SealedSecrets (old encrypted blobs will no longer decrypt).
+
 
 ## ArgoCD deployment
 
