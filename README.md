@@ -11,8 +11,9 @@ crdb-minikube/
 	namespace.yaml                   # Creates dedicated namespace `crdb`
 	services.yaml                    # Headless service for pod DNS + public service for client/UI access
 	cockroachdb-statefulset.yaml     # Single-node CockroachDB in insecure mode (auto-initializes)
-	bootstrap-sql-configmap.yaml     # Stores your SQL bootstrap (idempotent)
 	bootstrap-sql-job.yaml           # Executes the SQL against the running node
+	init.sql                         # Source SQL file (ConfigMap generated via Kustomize)
+	kustomization.yaml               # Generates ConfigMap from init.sql + applies manifests
 ```
 
 ## Quick start
@@ -32,8 +33,7 @@ kubectl -n crdb rollout status statefulset/cockroachdb
 # (Single-node mode auto-initializes; cluster init job removed)
 
 # Create the testdb database
-kubectl apply -f crdb-minikube/bootstrap-sql-configmap.yaml
-kubectl apply -f crdb-minikube/bootstrap-sql-job.yaml
+kubectl apply -k crdb-minikube
 
 # Verify
 kubectl -n crdb exec -it statefulset/cockroachdb -- \
@@ -53,7 +53,8 @@ Expected databases: `system`, `defaultdb`, `postgres`, and `testdb`.
 * This is intentionally single-node and `--insecure` for rapid local testing; do **not** use insecure mode in shared or production clusters.
 * Scale to 3 nodes: switch command back to `start` (not `start-single-node`), set `replicas: 3`, add explicit `--listen-addr`, `--sql-addr`, `--advertise-addr` and keep a `--join` list; then reintroduce an init Job to run once.
 * Secure mode: create certificates (node + client) as Kubernetes Secrets and replace `--insecure` with `--certs-dir=/cockroach/certs`.
-* SQL bootstrap can include users/roles/grants; keep statements idempotent (`IF NOT EXISTS`) to allow safe reapply.
+* Editing `init.sql` and re-applying (`kubectl apply -k crdb-minikube`) regenerates the ConfigMap (name stable via `disableNameSuffixHash`).
+* Add more SQL (users, grants) in `init.sql`; keep it idempotent (`IF NOT EXISTS`) for safe re-sync.
 
 ## ArgoCD deployment
 
