@@ -1,0 +1,5 @@
+## Namespace for CockroachDB resources (isolates them from other workloads)
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: crdb

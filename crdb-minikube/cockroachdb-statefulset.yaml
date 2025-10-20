@@ -1,3 +1,4 @@
+## Single-node CockroachDB StatefulSet (start-single-node auto-initializes cluster)
 apiVersion: apps/v1
 kind: StatefulSet
 metadata:
@@ -7,10 +8,12 @@ spec:
   serviceName: cockroachdb
   replicas: 1
   selector:
-    matchLabels: { app: cockroachdb }
+    matchLabels:
+      app: cockroachdb
   template:
     metadata:
-      labels: { app: cockroachdb }
+      labels:
+        app: cockroachdb
     spec:
       containers:
         - name: cockroach
@@ -23,16 +26,20 @@ spec:
             - --store=/cockroach/cockroach-data
             - --http-addr=0.0.0.0:8080
           ports:
-            - { name: grpc, containerPort: 26257 }
-            - { name: http, containerPort: 8080 }
+            - name: grpc
+              containerPort: 26257
+            - name: http
+              containerPort: 8080
           volumeMounts:
-            - { name: data, mountPath: /cockroach/cockroach-data }
+            - name: data
+              mountPath: /cockroach/cockroach-data
       terminationGracePeriodSeconds: 60
   volumeClaimTemplates:
     - metadata:
         name: data
       spec:
-        accessModes: ["ReadWriteOnce"]
+        accessModes:
+          - ReadWriteOnce
         resources:
           requests:
             storage: 5Gi

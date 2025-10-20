@@ -1,3 +1,4 @@
+## SQL bootstrap ConfigMap (idempotent database creation)
 apiVersion: v1
 kind: ConfigMap
 metadata:

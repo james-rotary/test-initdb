@@ -1,3 +1,4 @@
+## One-off Job that waits for CockroachDB readiness then runs bootstrap SQL
 apiVersion: batch/v1
 kind: Job
 metadata:
@@ -11,8 +12,9 @@ spec:
         - name: bootstrap
           image: cockroachdb/cockroach:v23.2.17
           volumeMounts:
-            - { name: init-sql, mountPath: /init }
-          command: ["/bin/sh","-c"]
+            - name: init-sql
+              mountPath: /init
+          command: ["/bin/sh", "-c"]
           args:
             - |
               until /cockroach/cockroach sql --insecure --host=cockroachdb-public.crdb.svc.cluster.local -e "select 1"; do

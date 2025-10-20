@@ -8,12 +8,11 @@ Minimal CockroachDB deployment on Minikube using a SQL "initdb" style bootstrap 
 
 ```
 crdb-minikube/
-	00-namespace.yaml                # Creates dedicated namespace `crdb`
-	10-services.yaml                 # Headless service for pod DNS + public service for client/UI access
-	20-statefulset.yaml              # Single-node CockroachDB in insecure mode (auto-initializes)
-	40-bootstrap-sql-configmap.yaml  # Stores your SQL bootstrap (idempotent)
-	50-bootstrap-sql-job.yaml        # Executes the SQL against the running node
-	init.sql                         # Actual SQL: creates `testdb`
+	namespace.yaml                   # Creates dedicated namespace `crdb`
+	services.yaml                    # Headless service for pod DNS + public service for client/UI access
+	cockroachdb-statefulset.yaml     # Single-node CockroachDB in insecure mode (auto-initializes)
+	bootstrap-sql-configmap.yaml     # Stores your SQL bootstrap (idempotent)
+	bootstrap-sql-job.yaml           # Executes the SQL against the running node
 ```
 
 ## Quick start
@@ -22,9 +21,9 @@ crdb-minikube/
 minikube start --cpus=4 --memory=6144
 
 # Apply base objects
-kubectl apply -f crdb-minikube/00-namespace.yaml
-kubectl apply -f crdb-minikube/10-services.yaml
-kubectl apply -f crdb-minikube/20-statefulset.yaml
+kubectl apply -f crdb-minikube/namespace.yaml
+kubectl apply -f crdb-minikube/services.yaml
+kubectl apply -f crdb-minikube/cockroachdb-statefulset.yaml
 
 # Wait for CockroachDB pod readiness
 kubectl -n crdb rollout status statefulset/cockroachdb
@@ -33,8 +32,8 @@ kubectl -n crdb rollout status statefulset/cockroachdb
 # (Single-node mode auto-initializes; cluster init job removed)
 
 # Create the testdb database
-kubectl apply -f crdb-minikube/40-bootstrap-sql-configmap.yaml
-kubectl apply -f crdb-minikube/50-bootstrap-sql-job.yaml
+kubectl apply -f crdb-minikube/bootstrap-sql-configmap.yaml
+kubectl apply -f crdb-minikube/bootstrap-sql-job.yaml
 
 # Verify
 kubectl -n crdb exec -it statefulset/cockroachdb -- \
@@ -55,6 +54,34 @@ Expected databases: `system`, `defaultdb`, `postgres`, and `testdb`.
 * Scale to 3 nodes: switch command back to `start` (not `start-single-node`), set `replicas: 3`, add explicit `--listen-addr`, `--sql-addr`, `--advertise-addr` and keep a `--join` list; then reintroduce an init Job to run once.
 * Secure mode: create certificates (node + client) as Kubernetes Secrets and replace `--insecure` with `--certs-dir=/cockroach/certs`.
 * SQL bootstrap can include users/roles/grants; keep statements idempotent (`IF NOT EXISTS`) to allow safe reapply.
+
+## ArgoCD deployment
+
+Apply the ArgoCD `Application` manifest to manage and continuously sync these manifests:
+
+```
+cockroachdb-application.yaml       # ArgoCD Application pointing to ./crdb-minikube
+```
+
+### Steps
+
+```bash
+# (Assumes ArgoCD installed; namespace argocd exists)
+kubectl apply -f cockroachdb-application.yaml
+
+# Watch Argo sync
+kubectl -n argocd get applications cockroachdb-single-node -w
+
+# After Healthy/Synced, verify database
+kubectl -n crdb exec -it statefulset/cockroachdb -- \
+	/cockroach/cockroach sql --insecure -e "SHOW DATABASES;"
+```
+
+### Customizing
+* Change `targetRevision` to main or a tag as needed.
+* Remove automated prune/selfHeal for manual approval flows.
+* Multi-node: modify `cockroachdb-statefulset.yaml` to use `start` and add join flags; add a one-time init Job manifest.
+
 
 ## Cleanup
 
