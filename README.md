@@ -56,6 +56,60 @@ Expected databases: `system`, `defaultdb`, `postgres`, and `testdb`.
 * Editing `init.sql` and re-applying (`kubectl apply -k crdb-minikube`) regenerates the ConfigMap (name stable via `disableNameSuffixHash`).
 * Add more SQL (users, grants) in `init.sql`; keep it idempotent (`IF NOT EXISTS`) for safe re-sync.
 
+## PIM Backend (Express + Prisma) Deployment
+
+Kustomize manifests live under `crdb-minikube/pim-backend/`:
+
+```
+crdb-minikube/pim-backend/
+	namespace.yaml          # pim namespace
+	configmap.yaml          # Non-sensitive env (DATABASE_URL, PORT, seed toggle)
+	deployment.yaml         # Single replica backend, probes, resource requests
+	service.yaml            # ClusterIP service on port 3000
+	kustomization.yaml      # Aggregates the above
+```
+
+### Build the image locally (Minikube Docker)
+```bash
+eval "$(minikube docker-env)"   # or: minikube image build -t pim-backend-api:dev -f Dockerfile /path/to/pim-backend-api
+minikube image build -t pim-backend-api:dev -f /home/jkicklighter@internal.rotarycorp.com/Documents/Maxpower/backend/pim-backend-api/Dockerfile /home/jkicklighter@internal.rotarycorp.com/Documents/Maxpower/backend/pim-backend-api
+```
+
+### Apply backend manifests manually
+```bash
+kubectl apply -k crdb-minikube/pim-backend
+kubectl -n pim get pods
+kubectl -n pim logs deploy/pim-backend-api -f
+```
+
+### Verify DB connectivity
+The entrypoint runs migrations / schema push automatically. Confirm tables exist:
+```bash
+kubectl -n crdb exec -it statefulset/cockroachdb -- \
+	/cockroach/cockroach sql --insecure -e "\dt testdb.public.*" || true
+```
+
+### ArgoCD application
+`pim-backend-application.yaml` deploys the backend from branch `pim-backend-api-config`.
+```bash
+kubectl apply -f pim-backend-application.yaml
+kubectl -n argocd get application pim-backend-api -w
+```
+
+### Port-forward backend (optional)
+```bash
+kubectl -n pim port-forward svc/pim-backend-api 3000:3000
+curl http://localhost:3000/api/health || true
+```
+
+### Next enhancements
+* Move `DATABASE_URL` into a Secret.
+* Add JWT / app secrets via Secret + `envFrom`.
+* Use image tags tied to Git commit SHAs.
+* Multi-node CockroachDB in secure mode.
+* Dedicated migration Job instead of entrypoint migrations (for stricter control).
+
+
 ## ArgoCD deployment
 
 Apply the ArgoCD `Application` manifest to manage and continuously sync these manifests:

@@ -1,0 +1,45 @@
+## Deployment for PIM backend API
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: pim-backend-api
+  namespace: pim
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: pim-backend-api
+  template:
+    metadata:
+      labels:
+        app: pim-backend-api
+    spec:
+      containers:
+        - name: app
+          # Build locally with: minikube image build -t pim-backend-api:dev -f Dockerfile . (from repo root of app)
+          image: pim-backend-api:dev
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 3000
+          envFrom:
+            - configMapRef:
+                name: pim-backend-config
+          readinessProbe:
+            httpGet:
+              path: /api/health
+              port: 3000
+            initialDelaySeconds: 15
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /api/health
+              port: 3000
+            initialDelaySeconds: 30
+            periodSeconds: 30
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi

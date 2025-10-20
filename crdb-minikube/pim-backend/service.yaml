@@ -1,0 +1,14 @@
+## Service exposing PIM backend inside cluster (optionally port-forward for local access)
+apiVersion: v1
+kind: Service
+metadata:
+  name: pim-backend-api
+  namespace: pim
+spec:
+  selector:
+    app: pim-backend-api
+  ports:
+    - name: http
+      port: 3000
+      targetPort: 3000
+  type: ClusterIP
