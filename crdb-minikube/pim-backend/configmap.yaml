@@ -5,7 +5,6 @@ metadata:
   name: pim-backend-config
   namespace: pim
 data:
-  # CockroachDB connection string (insecure local dev). In production move to a Secret.
-  DATABASE_URL: "postgresql://root@cockroachdb-public.crdb.svc.cluster.local:26257/testdb?sslmode=disable"
+  # CockroachDB connection string moved to a SealedSecret (DATABASE_URL).
   PORT: "3000"
   SKIP_DB_SEED: "false"
