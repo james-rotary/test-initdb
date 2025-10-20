@@ -1,0 +1,31 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: bootstrap-sql
+  namespace: crdb
+spec:
+  template:
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: sql
+          image: cockroachdb/cockroach:v23.2.17
+          imagePullPolicy: IfNotPresent
+          command:
+            - /bin/sh
+            - -c
+            - |
+              echo "Waiting for CockroachDB readiness..."
+              for i in $(seq 1 30); do
+                /cockroach/cockroach sql --insecure --host=cockroachdb-public:26257 -e 'select 1;' && break
+                echo "Not ready yet ($i)"; sleep 2;
+              done
+              echo "Applying init SQL..."
+              /cockroach/cockroach sql --insecure --host=cockroachdb-public:26257 -f /init/init.sql
+          volumeMounts:
+            - name: init-sql
+              mountPath: /init
+      volumes:
+        - name: init-sql
+          configMap:
+            name: bootstrap-sql

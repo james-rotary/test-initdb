@@ -2,6 +2,38 @@
 
 Minimal CockroachDB deployment on Minikube using a SQL "initdb" style bootstrap to create a `testdb` database.
 
+---
+
+## Architecture Overview
+
+This repository provides two layers:
+
+1. CockroachDB Infrastructure (single-node, insecure, dev only)
+	* Namespace: `crdb`
+	* StatefulSet: `cockroachdb` (runs `start-single-node` so it self-initializes)
+	* Services:
+	  - `cockroachdb` (headless for stable pod DNS)
+	  - `cockroachdb-public` (client & UI access)
+	* Bootstrap SQL Job: `bootstrap-sql` applies `init.sql` (idempotent) creating logical database `testdb`.
+	* Kustomize generates a ConfigMap from `init.sql` (`bootstrap-sql`).
+
+2. PIM Backend Application (Express + Prisma)
+	* Namespace: `pim`
+	* Deployment: `pim-backend-api` consuming `DATABASE_URL` that points at `testdb` via `cockroachdb-public` service.
+	* On startup the container runs Prisma migrations / schema push inside `testdb` (tables & indexes).
+
+Separation of concerns:
+* Infrastructure layer guarantees the CockroachDB node and the logical database exist.
+* Application layer owns schema objects (tables) within that logical database.
+
+Flow diagram (conceptual):
+```
+init.sql -> ConfigMap -> bootstrap-sql Job --> creates database testdb
+															 |
+															 v
+										pim-backend-api Deployment (Prisma) -> creates/updates tables in testdb
+```
+
 ## Contents
 
 `crdb-minikube/` holds a tiny, ordered set of Kubernetes manifests plus an `init.sql` file:
@@ -46,6 +78,8 @@ kubectl -n crdb port-forward svc/cockroachdb-public 8080:8080
 ```
 
 Expected databases: `system`, `defaultdb`, `postgres`, and `testdb`.
+
+If the bootstrap Job runs after the DB pod is ready, `testdb` will appear. The Job is idempotent; re-running kustomize apply is safe.
 
 ## Notes
 
@@ -151,4 +185,97 @@ minikube delete   # if you want to remove the whole cluster
 * Add TLS cert generation job & secrets.
 * Integrate into CI (apply then smoke test `SHOW DATABASES`).
 * Parameterize version via Kustomize or Helm if needed later.
+
+---
+
+## End-to-End Validation Checklist
+
+1. ArgoCD Applications
+	```bash
+	kubectl -n argocd get applications
+	```
+	Expect both `cockroachdb-single-node` and `pim-backend-api` to be `Synced` & `Healthy`.
+
+2. CockroachDB pod & Job
+	```bash
+	kubectl -n crdb get pods
+	kubectl -n crdb logs job/bootstrap-sql
+	```
+	Expect `bootstrap-sql` status `Completed` and `cockroachdb-0` Ready.
+
+3. Database presence
+	```bash
+	kubectl -n crdb exec cockroachdb-0 -- \
+	  /cockroach/cockroach sql --insecure -e "SHOW DATABASES;" | grep testdb
+	```
+
+4. Backend pod health
+	```bash
+	kubectl -n pim get pods -l app=pim-backend-api
+	kubectl -n pim logs deploy/pim-backend-api | grep -i prisma || true
+	```
+
+5. (Optional) List tables created by Prisma
+	```bash
+	kubectl -n crdb exec cockroachdb-0 -- \
+	  /cockroach/cockroach sql --insecure -e "SHOW TABLES FROM testdb.public;"
+	```
+
+6. Backend health endpoint
+	```bash
+	kubectl -n pim port-forward svc/pim-backend-api 3000:3000 &
+	curl -sf http://localhost:3000/api/health || echo "health check failed"
+	```
+
+## Troubleshooting
+
+| Symptom | Likely Cause | Remedy |
+|---------|--------------|--------|
+| Backend pod CrashLoop (P1001) | CockroachDB not ready or `testdb` absent | Ensure `cockroachdb-0` Ready; re-apply kustomize to re-run bootstrap job |
+| Bootstrap Job stuck `ContainerCreating` | ConfigMap not in `crdb` namespace | Add `namespace: crdb` to kustomization and re-apply |
+| ArgoCD app Healthy but no resources | Path or targetRevision mismatch / repo private | Confirm repo URL, branch, and path; check ArgoCD repo permissions |
+| Port-forward conflict on 8080 | Multiple forwards using same local port | Use alternative local port: `8081:8080` |
+| Tables missing after startup | Prisma migrations not executed yet | Check logs, ensure entrypoint runs migrate or add migration Job |
+
+## Enhancement Roadmap
+
+Short-term (low friction):
+* Move `DATABASE_URL` to a Secret (then remove it from ConfigMap).
+* Add HTTP readiness probe for CockroachDB (`/health?ready=1`).
+* Tag backend images with Git commit SHAs using Kustomize `images:` block.
+* Add simple smoke test script (CI) executing `SHOW DATABASES;` after sync.
+
+Mid-term:
+* Dedicated migration Job (Prisma `migrate deploy`) instead of doing it in the app container.
+* Multi-node CockroachDB (3 replicas, `start` + `--join` flags, one-time init job).
+* TLS (cert generation + Secrets, replace `--insecure`).
+* Observability: Prometheus scraping + Grafana dashboards, structured logs.
+
+Long-term:
+* App-of-Apps ArgoCD pattern (one root Application manages both layers).
+* Automated image build & promotion pipeline (dev -> staging -> prod branches).
+* Rollbacks via ArgoCD sync to previous revisions + schema drift detection.
+
+## Why Separate DB Creation and Schema Migrations?
+
+* Logical DB creation (`CREATE DATABASE IF NOT EXISTS testdb`) is stable infra state, easy to express declaratively and idempotently.
+* Table/column migrations evolve with application releases—keeping them with the app (or a migration Job tied to app version) ensures schema matches code.
+* This separation reduces cross-team coupling and makes rollback clearer (roll back app image & associated migration Job; the database existence remains intact).
+
+---
+
+## Glossary
+
+| Term | Meaning |
+|------|---------|
+| Logical Database | Named database inside CockroachDB (`testdb`) distinct from the cluster itself |
+| Bootstrap | One-time (idempotent) creation of base logical DB objects via Job |
+| Kustomize | Overlay tool assembling manifests and generating ConfigMaps/Secrets |
+| ArgoCD Application | CRD that watches a Git path and syncs manifests into the cluster |
+
+---
+
+## License
+
+This repository is for internal demo / experimentation. Add license terms here if distributing externally.
 
